@@ -111,7 +111,7 @@ def test_default_status_filter_and_summary(company):
                 dict(domain='legacy.example', account_name='Possible Forge Limited', country='UK')]
     result = discover_accounts([company, existing, possible], accounts)
     assert [r['salesforce_status'] for r in result['results']] == ['NET_NEW']
-    assert result['summary'] == {'total_candidates': 3, 'EXISTS': 1, 'POSSIBLE_MATCH': 1, 'NET_NEW': 1}
+    assert result['summary'] == {'total_candidates': 3, 'EXISTS': 1, 'POSSIBLE_MATCH': 1, 'NET_NEW': 1, 'NOT_CHECKED': 0}
     assert len(discover_accounts([company, existing, possible], accounts, show_all=True)['results']) == 3
     assert not discover_accounts([company], [], min_score=100, country='Ireland')['results']
 
@@ -130,7 +130,7 @@ def test_fixtures():
     assert 15 <= len(accounts) <= 20
     assert len({row['company_id'] for row in companies}) == len(companies)
     result = discover_accounts(companies, accounts, show_all=True, limit=100)
-    assert result['summary'] == {'total_candidates': 44, 'EXISTS': 16, 'POSSIBLE_MATCH': 4, 'NET_NEW': 24}
+    assert result['summary'] == {'total_candidates': 44, 'EXISTS': 16, 'POSSIBLE_MATCH': 4, 'NET_NEW': 24, 'NOT_CHECKED': 0}
 
 
 def test_mock_mode_never_contacts_api(monkeypatch, capsys):
@@ -146,11 +146,11 @@ def test_mock_mode_never_contacts_api(monkeypatch, capsys):
     assert 'Net-new accounts: 24' in output
 
 
-def test_live_pipeline_fails_before_leadiq(monkeypatch, capsys):
+def test_live_pipeline_without_key_fails_before_http(monkeypatch, capsys):
     monkeypatch.setenv('USE_MOCK_DATA', 'false')
-    with patch('providers.search_companies', side_effect=AssertionError('Must not call API')):
+    with patch('requests.post', side_effect=AssertionError('Must not call API')):
         assert main(['search']) == 1
-    assert 'Live Salesforce integration is not implemented' in capsys.readouterr().err
+    assert 'LeadIQ not configured' in capsys.readouterr().err
 
 
 def test_live_adapter_uses_canonical_contract(company):

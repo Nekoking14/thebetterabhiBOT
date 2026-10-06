@@ -1,25 +1,25 @@
-# SDR account discovery MVP
+# Account Finder
 
-Local Python CLI with fictional LeadIQ candidates and Salesforce accounts. It
-matches duplicates, defaults to NET_NEW accounts, scores ICP fit and ranks results.
-No Streamlit, Salesforce API, AI, scraping or Sales Navigator automation is included.
+A local SDR scrubbing workspace for macOS. Discover companies from mock data or
+read-only LeadIQ searches, score accounts, rank people, and review a persistent
+daily list. The Streamlit workflow does not use Salesforce.
 
-## Running without API keys
+## macOS setup
 
-On macOS, open the project in VS Code and use its terminal. Check Python first:
+Check Python (3.10 or newer):
 
 ```sh
 cd /Users/minghi/thebetterabhiBOT
 python3 --version
 ```
 
-If Python is missing, install Homebrew from [brew.sh](https://brew.sh), then run:
+If Python is missing, install Homebrew from [brew.sh](https://brew.sh), then:
 
 ```sh
 brew install python
 ```
 
-For a fresh setup:
+Create and activate the virtual environment, then install dependencies:
 
 ```sh
 python3 -m venv .venv
@@ -27,169 +27,270 @@ source .venv/bin/activate
 pip3 install -r requirements.txt
 ```
 
-Create your environment file if it does not already exist (preserves existing keys):
+Copy the example only if you do not already have a configuration:
 
 ```sh
 if [ ! -f .env ]; then cp .env.example .env; fi
 ```
 
-Open `.env` in VS Code and ensure it contains:
+Open `.env` in VS Code. A working demo needs no API key:
 
 ```dotenv
-USE_MOCK_DATA=true
-LEADIQ_API_KEY=your_leadiq_api_key_here
+ACCOUNT_PROVIDER=mock
+PROSPECT_PROVIDER=mock
+SALESFORCE_PROVIDER=disabled
+LEADIQ_API_KEY=
+LOCAL_DB_PATH=data/app.db
 ```
 
-No real key is needed. Mock mode is also the default when the variable is absent.
-Only `true` and `false` are accepted (case-insensitive). Environment variables take
-precedence over `.env`; the file is loaded relative to the project directory.
-`.env` and `.venv` are ignored by Git. Select `.venv/bin/python` in VS Code.
+Select `.venv/bin/python` as the VS Code interpreter. Activate the environment
+again in each new terminal; `deactivate` leaves it.
 
-Run a ranked search:
+Start the app with explicit mock overrides so an older live configuration cannot
+take precedence:
 
 ```sh
-USE_MOCK_DATA=true python3 main.py search --country "United Kingdom" --industry "Manufacturing" --min-employees 500 --max-employees 5000 --min-score 60 --limit 5
+cd /Users/minghi/thebetterabhiBOT
+source .venv/bin/activate
+ACCOUNT_PROVIDER=mock PROSPECT_PROVIDER=mock USE_MOCK_DATA=true python3 -m streamlit run app.py --server.address 127.0.0.1 --browser.gatherUsageStats false
 ```
 
-Explore all candidates and duplicate statuses:
+Open [Account Finder](http://127.0.0.1:8501/). Stop with Ctrl+C. If `.env` already
+selects mock providers, the shorter requested command also works:
 
 ```sh
-USE_MOCK_DATA=true python3 main.py search --show-all --limit 50
-USE_MOCK_DATA=true python3 main.py search --country "Ireland" --min-score 50 --limit 10
+USE_MOCK_DATA=true python3 -m streamlit run app.py --server.address 127.0.0.1 --browser.gatherUsageStats false
+```
+
+Explicit `ACCOUNT_PROVIDER` / `PROSPECT_PROVIDER` settings override the legacy
+`USE_MOCK_DATA` defaults; environment variables override `.env`. The UI ignores
+Salesforce configuration, including invalid or missing CRM settings. Existing
+Salesforce adapters are retained only for the separate CLI comparison commands.
+
+## Local Daily Scrub Lists
+
+The database is the source of truth for account lists and review statuses.
+
+- Default database: **`/Users/minghi/thebetterabhiBOT/data/app.db`**.
+  The folder and schema are created automatically.
+- One session exists per **Mac local calendar day**, using the machine's timezone.
+  Startup/reruns load today's existing session or create it. UTC timestamps record
+  changes; the session's date determines which list owns an account.
+- Each Find Accounts search appends eligible companies to today's list. Restarting
+  Streamlit or reopening the browser retains accounts, status and saved prospects.
+  A new day gets a separate list; History opens previous days for review.
+- Account statuses are only **NEW**, **REVIEWED**, and **REJECTED**. Status changes
+  save immediately. Repeated searches do not reset status or overwrite snapshots.
+- Nothing is written to LeadIQ or Salesforce. No LeadIQ lists are created.
+- Mock and live account sources are labeled `mock` and `leadiq`; prospect source
+  is stored separately. The fixtures contain 44 fictional companies and 351 people.
+
+Deduplication is scoped to a single day: normalized domain first, then
+provider-qualified company ID, then exact normalized company name when stronger
+identifiers are missing. Domains strip HTTP/HTTPS, `www.`, ports, paths and trailing
+dots, lowercase and handle IDNs; other subdomains remain distinct. Names normalize
+case, accents, punctuation and trailing legal suffixes. No fuzzy matching is used
+for local scrub lists. Two companies with the same name but conflicting strong
+identifiers stay separate. An ID is namespaced by provider; a domain can match
+across providers. Alternate strong identities from duplicate searches are remembered.
+
+Example in the current fixtures (UK, 500–5000 employees, minimum Account Score 60):
+Manufacturing adds 9, Logistics adds 4, repeating Manufacturing skips 9 duplicates.
+Today's list contains 13 accounts. The same company can appear on another day.
+
+A bounded snapshot of up to 10 ranked people supports offline review; the panel
+shows the top three. The app stores account summary fields and minimal prospect
+identity/title/score/link fields, not full provider payloads, email addresses,
+phone numbers or credentials. Provider search caches are separate, in-memory only.
+
+Override `LOCAL_DB_PATH` if needed; relative paths resolve against this project.
+The database and SQLite sidecars are ignored by Git at the default location.
+If you choose another location, keep that database outside version control yourself.
+
+## Workspace
+
+Sidebar navigation:
+
+| Page | Working surface |
+| --- | --- |
+| Account Discovery | Compact filters and Find Accounts; the daily table remains below |
+| Today's Scrub List | Accounts/New/Reviewed/Rejected metrics, dense sortable table, review panel |
+| History | Date selector, that day's metrics/table and review panel |
+
+The wide layout uses text branding, navy text, white surfaces, thin gray borders
+and a small green primary action. No NinjaOne logos or downloaded assets are used.
+The light theme is configured in `.streamlit/config.toml`; compact style overrides
+are centralized in `app.py`.
+
+Find Accounts performs account retrieval → local filters and Account Score →
+people retrieval/ranking for new companies → transactional daily append. A summary
+reports candidates, additions, duplicates, below-threshold companies and eligible
+companies beyond the result limit, then focuses Today's Scrub List. No competing
+permanent results table is maintained. Already-listed accounts skip repeated people
+searches. Rendering, changing page and reviewing saved records never trigger API calls.
+
+Primary filters are country (All/UK/Ireland), industry, inclusive employee bounds,
+minimum Account Score, persona, comma-separated job titles, seniority, minimum
+Prospect Score and people per account. More filters contains result limit,
+function and skill groups. Live industry accepts a custom API-supported value.
+Unknown employee counts fail a specified employee bound.
+
+Table columns: Score, Company, Employees, Industry, Country, Best Prospect,
+Prospect Score, Status, Actions. Default order is Account Score descending, then
+company name and local ID. Sort through column headings; filter by status.
+**Select a row to Review**, or use the Review picker below the table; Actions
+contains Open Sales Nav. The review panel separates Account Score from Prospect
+Score, shows account information/top three people, and saves status immediately.
+
+Find Better Prospects searches the **same company** and replaces its saved ranked
+prospect snapshot without changing Account Score/status. Refine prospect search
+provides optional persona, titles and minimum score; blank selections broaden the
+search across personas, with top three saved. Select the matching prospect provider
+in Data sources when reviewing a record from another source. A company is retained
+even if no person matches or a people request fails; failures stop further people
+requests for that batch and show a clear message.
+
+Sales Navigator uses an existing safe HTTPS LinkedIn profile/lead URL when present.
+Otherwise the existing helper builds a best-effort people search using name/company.
+Manual copyable search text is available in review. The user opens/signs in manually;
+there is no scraping, login automation, browser automation or LinkedIn API integration.
+
+## Database safety and development reset
+
+`database.py` owns initialization and transactional schema migrations;
+`repositories.py` owns queries. SQLite constraints enforce unique days,
+daily strong identities, fallback keys, valid statuses/sources and score bounds.
+Serialized transactions prevent concurrent duplicate inserts and roll back failed
+batches. Connections enable foreign keys and a 10-second lock timeout.
+
+Schema version 1 uses `PRAGMA user_version` and an application identifier. Newer
+schemas and unrecognized existing databases are rejected with data preserved.
+Future migrations must be explicit, incremental and transactional. No automatic
+destructive migration or reset occurs.
+
+**Stop Streamlit before resetting.** This permanently removes all local daily lists:
+
+```sh
+python3 main.py reset-local-data
+```
+
+Type the exact word `RESET` to confirm; any other answer or EOF cancels. To confirm
+without a prompt, for disposable development data:
+
+```sh
+python3 main.py reset-local-data --yes
+```
+
+This operates only on `LOCAL_DB_PATH` (default `data/app.db`) and its SQLite
+sidecars. It refuses unrelated files/symlinks, does not remove provider fixtures or
+`.env`, and makes no API calls. The app initializes a fresh database next startup.
+To back up local lists, stop Streamlit and copy `data/app.db` to a safe location.
+
+## Read-only LeadIQ
+
+Set `ACCOUNT_PROVIDER=leadiq` and `PROSPECT_PROVIDER=leadiq` in `.env`.
+Put the **Secret Base64 API key** from LeadIQ Settings → API Keys in
+`LEADIQ_API_KEY`. Do not encode it again or include the `Basic` prefix.
+Never commit `.env`. Start using the same Streamlit command without mock overrides.
+
+```sh
+python3 main.py test-auth --provider leadiq
+```
+
+Authentication uses `query TestAuth { account { plans { name } } }` against
+`https://api.leadiq.com/graphql`. Missing keys/placeholders, authentication,
+rate limits, connection/timeouts, HTTP/JSON and GraphQL errors produce readable
+messages. The app installs and starts without a key and offers Use mock LeadIQ.
+Live requests are explicit user actions only; Find Accounts includes people
+searches for newly found companies. These searches may consume plan credits.
+
+Queries are isolated in `leadiq_schema.py`, based on the
+[LeadIQ reference](https://developer.leadiq.com/) and
+[public API guide](https://leadiqhelp.zendesk.com/hc/en-us/articles/29375289152795-LeadIQ-Public-API-Guide).
+No authenticated live validation has been performed because no real key is available.
+Schema errors point to the query/input mappings; fields are never invented.
+
+Verified company fields: ID/name/domain/employees/industry/country/city and
+`totalContactsInCompany`. Company LinkedIn URL, IT headcount, locations, IT hiring
+and growth remain `None`. **Current live Account Scores can reach at most 55**;
+the live minimum defaults to 0. Scoring weights are unchanged.
+Flat people search supplies ID/company ID/name/title/role/seniority/location/profile
+URL; skills are `[]`, email/phone availability unknown, with no enrichment.
+The saved snapshot omits those unavailable fields.
+
+LeadIQ Executive maps to local C-Level, SeniorIndividualContributor to Senior,
+and InformationTechnology/IT to Information Technology; unknown values remain
+unchanged. Head/Entry are filtered locally because they are not documented API
+filter enums. Title search and country/industry values depend on the API schema/plan.
+Ranking is over one bounded retrieved page, not every possible API result.
+No automatic pagination, retries or enrichment is included.
+
+Configuration:
+
+```dotenv
+LEADIQ_CACHE_TTL_SECONDS=3600
+LEADIQ_ACCOUNT_FETCH_LIMIT=100
+LEADIQ_PROSPECT_FETCH_LIMIT=50
+```
+
+Company budget accepts 1–500; people budget 1–100. Successful GraphQL responses
+use a per-session bounded TTL cache (0–86400 seconds; 0 disables). Errors are
+not cached. Keys/raw Authorization headers are never stored; rotating credentials
+invalidates cached results. Connected means a request succeeded in this session,
+not an ongoing health guarantee.
+
+## Scoring and architecture
+
+Account and Prospect Scores remain independent deterministic 0–100 values.
+Account weights: size 25, industry 20, UK/Ireland 10, IT headcount 15,
+locations 10, IT hiring 10, growth 10. Missing signals earn zero.
+Account display bands: Exceptional ≥90, Strong ≥80, Good ≥70, Secondary ≥55,
+Weak below 55; these labels do not change scoring.
+
+Prospect weights: title 30, seniority 20, function 15, relevant skills 20,
+location 5, decision influence 10, with existing role tiers/penalties and
+stable tie-breaks. Persona/title/seniority/function filters combine with AND;
+multiple titles use OR; Custom requires a title. Skill groups supply ranking
+evidence and do not require a person to have listed skills.
+See [prospect_calibration_report.md](prospect_calibration_report.md) for the
+existing 351-person calibration. These are SDR assumptions, not predictive models.
+
+```text
+app.py → scrub_service.py
+          ├─ providers / leadiq.py → discovery.py → scoring.py
+          ├─ prospect providers → prospect_discovery.py → prospect_scoring.py
+          └─ repositories.py → database.py → data/app.db
+main.py → existing isolated CLI services + local reset command
+```
+
+The separate CLI comparison path and `matching.py`/Salesforce CSV/mock adapters
+remain for later use. They are not required by or read from the daily UI.
+CLI searches print results and **do not append** to the daily database:
+
+```sh
+python3 main.py search --provider mock --salesforce-provider disabled --country "United Kingdom" --industry "Manufacturing" --min-employees 500 --max-employees 5000 --limit 20
+python3 main.py prospects --provider mock --company-id MOCK-LIQ-025 --limit 3
 python3 main.py --help
 ```
 
-Activate the environment each time you open a terminal with
-`source .venv/bin/activate`; use `deactivate` when finished.
-
-All 44 companies are fictional. Domains use the reserved `.example` namespace;
-none is presented as real LeadIQ data. The 20 mock Salesforce rows intentionally
-produce 16 exact domain duplicates and 4 possible name matches, leaving 24 net-new
-accounts before filters. The fixtures include UK/Ireland, different cities,
-industries, headcounts, locations and growth/hiring signals.
-
-## Architecture
-
-```text
-Mock LeadIQ JSON / LeadIQ API adapter
-                  ↓
-        canonical account candidates
-                  ↓
-Salesforce matching ← mock CSV / future Salesforce API adapter
-                  ↓
-          NET_NEW (default filter)
-                  ↓
-       ICP scoring → ranked results → CLI
-```
-
-- `config.py`: loads `.env` and chooses mock or live mode.
-- `providers.py`: source adapters. Candidate dictionaries use `company_id`,
-  `company_name`, `domain`, `employee_count`, `industry`, `country`, `city`,
-  `matching_contacts`, `it_headcount`, `number_of_locations`, `it_hiring` and
-  `growth_signal`. CRM dictionaries use `salesforce_id`, `account_name`, `domain`
-  and `country`. Business logic depends on these records rather than file/API access.
-- `leadiq.py`: preserved GraphQL client, authentication test, company search and
-  shared domain normalization. Direct API requests are blocked in mock mode.
-- `matching.py`: name normalization, similarity, exact domain comparison and
-  duplicate status. `normalize_domain` is re-exported here from the shared implementation.
-- `scoring.py`: weights, target industries and tier rules in one place.
-- `discovery.py`: pure candidate filtering, duplicate classification, scoring,
-  score/status filtering, sorting and final result limiting.
-- `main.py`: CLI parsing, presentation and human-readable errors.
-
-`--country` and `--industry` are case-insensitive exact filters; UK/GB and IE are
-country aliases. Employee bounds are inclusive. Unknown employee counts fail a
-specified employee bound. `--min-score` accepts 0–100, `--limit` is positive and
-applies after matching, score filtering and ranking. Default display is NET_NEW;
-`--show-all` includes POSSIBLE_MATCH and EXISTS. All displayed accounts sort by
-score descending, then company name and ID for deterministic ties.
-
-The summary counts candidates after country/industry/employee filters, **before**
-status, minimum-score and display-limit filters. Thus it describes Salesforce
-coverage of the search pool. The display count separately shows eligible and
-printed accounts. In mock mode the entire fixture is processed before limiting.
-
-## Duplicate policy
-
-Exact normalized domain equality always returns EXISTS, regardless of name or
-country. A missing domain never matches another missing domain. Domain normalization
-removes HTTP/HTTPS, leading `www.`, ports, paths and trailing dots, handles IDNs and
-lowercases hostnames. Other subdomains are preserved; it does not derive registrable
-domains, follow redirects or merge corporate subsidiaries.
-
-Company names are case-folded, accents/punctuation normalized and trailing legal
-suffixes such as Limited/Ltd/PLC removed. Standard-library `difflib.SequenceMatcher`
-returns similarity from 0–100. A similarity of at least 90 **and the same known
-country** yields POSSIBLE_MATCH. Missing or conflicting geography cannot support
-this name-only comparison. Fuzzy names never yield EXISTS; possible matches are
-excluded by default for review. Country is the supporting geography because the
-mock CRM contract contains no city. Threshold and suffix policy are editable in
-`matching.py`; these heuristic decisions require calibration on real CRM data.
-
-## Editable ICP model
-
-| Component | Points / rule |
-| --- | --- |
-| Employee size | 25 for 500–5000 inclusive, otherwise 0 |
-| Industry | 20 for Manufacturing, Technology or Logistics |
-| UK/Ireland | 10 |
-| IT headcount | 15 for ≥50, 10 for ≥20, 5 for ≥5 |
-| Locations | 10 for ≥5, 5 for ≥2 |
-| IT hiring | 10 for boolean true |
-| Growth signal | 10 for boolean true |
-
-Maximum is 100. `WEIGHTS` must total 100; edit weights and tiers in `scoring.py`.
-The function returns `total_score`, `components` and a reason for each awarded
-component. Unknown signals earn zero. These are initial product assumptions,
-not a validated predictive model; fictional boolean hiring/growth flags simulate
-signals that a later provider will need to supply.
-
-## Live LeadIQ foundation
-
-LeadIQ queries follow the [public schema](https://developer.leadiq.com/) and
-[authentication guide](https://leadiqhelp.zendesk.com/hc/en-us/articles/29375289152795-LeadIQ-Public-API-Guide).
-Use the **Secret Base64 API key** from LeadIQ Settings > API Keys in `.env`. Do not
-encode it again or prefix the stored value with `Basic`. To test credentials:
-
-```sh
-USE_MOCK_DATA=false python3 main.py test-auth
-```
-
-Without a key this shows a clear error. In mock mode `test-auth` explicitly skips
-verification and makes no request. The live query is
-`query TestAuth { account { plans { name } } }`.
-
-`leadiq_request(query, variables=None)` returns GraphQL data or raises `LeadIQError`.
-It handles authentication, rate limits, connection/timeouts, HTTP/JSON failures and
-GraphQL errors, rejecting partial responses. It uses 10-second connection and
-30-second read timeouts without automatic retries. Schema validation errors direct
-you to update the query/input mappings against your account schema.
-
-The documented grouped advanced search supports locations/country, industries,
-company-size min/max and company limit. It returns company ID/name/domain/employee
-count/industry/country/city and `totalContactsInCompany`. This count is not a count
-of verified emails. The returned company type has no LinkedIn URL; `linkedin_url`
-remains `None`. IT headcount, locations and hiring/growth fields are not requested
-from the API or invented; the adapter sets them to `None` and scoring gives no
-points for those signals. Live verification remains pending actual credentials.
-
-Switching to `USE_MOCK_DATA=false` selects live adapters without changing matching
-or scoring, but **live discovery is intentionally unavailable until the Salesforce
-API adapter is implemented**. It fails clearly before contacting LeadIQ and does
-not silently compare live prospects against fictional CRM data. The LeadIQ adapter
-currently supplies one bounded page of 100 candidates; production discovery will
-need filter pushdown and pagination before ranking an entire live search pool.
+CSV comparison is optional through `search --salesforce-provider csv
+--salesforce-csv-path /path/to/export.csv`; required UTF-8 headers are
+`salesforce_id,account_name,domain,country`. Legacy CLI statuses describe that
+explicit comparison only; no CRM verification is claimed in the daily app.
 
 ## Tests
 
 ```sh
 source .venv/bin/activate
 python3 -m pytest -q
-python3 -m compileall -q main.py leadiq.py config.py providers.py matching.py scoring.py discovery.py tests
+python3 -m compileall -q app.py database.py repositories.py scrub_service.py main.py config.py tests
 ```
 
-Tests cover normalization, domain priority, fuzzy-match geography, scoring and
-boundaries, filtering, summary semantics, ranking, fixture counts, missing keys,
-API error handling and mock-mode network isolation. Requests are mocked; tests
-never need credentials or consume credits. Original unittest tests also run under
-pytest.
+Tests isolate `.env`, credentials and database paths. Mock flows make no HTTP
+requests; live-provider tests use synthetic responses. Coverage includes original
+normalization/scoring/prospect calibration, migrations, transactions/concurrency,
+daily reuse/rollover, domain/ID/name deduplication, status persistence, ordering,
+three searches, restart, history, missing keys and confirmation-protected reset.
+UI tests use Streamlit AppTest; history validation uses a separate previous-day
+test session. No Salesforce API, writeback, LLM, cloud/team features or notifications
+are part of this iteration.

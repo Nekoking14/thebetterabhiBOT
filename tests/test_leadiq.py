@@ -31,7 +31,7 @@ class RequestTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {"LEADIQ_API_KEY": "test-secret", "USE_MOCK_DATA": "false"})
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.dotenv = patch("leadiq.load_dotenv")
+        self.dotenv = patch("config.load_environment")
         self.dotenv.start()
         self.addCleanup(self.dotenv.stop)
         self.post = patch("leadiq.requests.post")
